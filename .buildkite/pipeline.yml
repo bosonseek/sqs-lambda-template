@@ -1,0 +1,122 @@
+agents:
+  queue: candidatemanagement-dev:cicd-managed-arm-vcurrent
+
+configs:
+  plugins:
+    - &aws-sm
+      seek-oss/aws-sm#v2.3.2:
+        env:
+          NPM_READ_TOKEN: arn:aws:secretsmanager:ap-southeast-2:987872074697:secret:npm/npm-read-token
+
+    - &docker-ecr-cache
+      seek-oss/docker-ecr-cache#v2.1.1: &docker-ecr-cache-defaults
+        cache-on:
+          - .npmrc
+          - pnpm-lock.yaml
+        secrets: id=npm,src=tmp/.npmrc
+
+    - &private-npm
+      seek-oss/private-npm#v1.2.0:
+        env: NPM_READ_TOKEN
+        output-path: tmp/
+
+  base-steps:
+    - &deploy
+      commands:
+        - echo '--- pnpm install --offline'
+        - pnpm install --offline
+        - echo '+++ pnpm run deploy'
+        - pnpm run deploy
+      concurrency: 1
+      plugins:
+        - *aws-sm
+        - *private-npm
+        - *docker-ecr-cache
+        - docker-compose#v5.2.0:
+            dependencies: false
+            run: app
+            environment:
+              - GITHUB_API_TOKEN
+            propagate-environment: true
+      retry:
+        manual:
+          # Only use this if you need to roll back a deployment ASAP.
+          # Always follow up with a proper revert or fix in Git history.
+          permit_on_passed: true
+
+env:
+  VERSION: ${BUILDKITE_COMMIT:0:7}.${BUILDKITE_BUILD_NUMBER}
+
+steps:
+  - label: 🧪 Test, Lint & Build
+    commands:
+      - echo '--- pnpm install --offline'
+      - pnpm install --offline
+      - echo '+++ pnpm test:ci'
+      - pnpm test
+      - echo '--- pnpm lint'
+      - pnpm lint
+    env:
+      GET_GITHUB_TOKEN: please
+    plugins:
+      - *aws-sm
+      - *private-npm
+      - *docker-ecr-cache
+      - docker-compose#v5.2.0:
+          run: app
+          environment:
+            - GITHUB_API_TOKEN
+          propagate-environment: true
+    timeout_in_minutes: 10
+
+  - agents:
+      queue: candidatemanagement-dev:cicd-managed-arm-vcurrent
+    branches: '!renovate-*'
+    label: 🧖‍♀️ Warm Dev
+    command: ':'
+    plugins:
+      - *aws-sm
+      - *private-npm
+      - seek-oss/docker-ecr-cache#v2.1.1:
+          <<: *docker-ecr-cache-defaults
+          skip-pull-from-cache: true
+
+  - wait
+  - block: 🙋🏻‍♀️ Deploy Dev
+    branches: '!${BUILDKITE_PIPELINE_DEFAULT_BRANCH}'
+
+  - <<: *deploy
+    agents:
+      queue: candidatemanagement-dev:cicd-managed-arm-vcurrent
+    env:
+      ENVIRONMENT: dev
+    label: 🤞 Deploy Dev
+    concurrency_group: 'sqs-lambda-template/deploy/dev'
+    key: deploy-dev
+
+  - block: 🙋🏻‍♀️ Deploy Dev (Hotswap)
+    key: deploy-dev-hotswap-block
+    branches: '!${BUILDKITE_PIPELINE_DEFAULT_BRANCH}'
+
+  - <<: *deploy
+    branches: '!${BUILDKITE_PIPELINE_DEFAULT_BRANCH}'
+    depends_on: deploy-dev-hotswap-block
+    agents:
+      queue: candidatemanagement-dev:cicd-managed-arm-vcurrent
+    env:
+      ENVIRONMENT: dev
+    commands:
+      - echo '--- pnpm install --offline'
+      - pnpm install --offline
+      - echo '+++ pnpm run deploy:hotswap'
+      - pnpm run deploy:hotswap
+    label: 🤞 Deploy Dev (Hotswap)
+    concurrency_group: 'sqs-lambda-template/deploy/dev'
+
+  - <<: *deploy
+    env:
+      ENVIRONMENT: prod
+    label: 🚀 Deploy Prod
+    branches: ${BUILDKITE_PIPELINE_DEFAULT_BRANCH}
+    concurrency_group: 'sqs-lambda-template/deploy/prod'
+    depends_on: deploy-dev

@@ -1,0 +1,39 @@
+{
+  "private": true,
+  "license": "UNLICENSED",
+  "scripts": {
+    "deploy": "cdk deploy appStack --require-approval never --context stage=${ENVIRONMENT}",
+    "deploy:hotswap": "pnpm --silent deploy --hotswap",
+    "deploy:watch": "pnpm --silent deploy:hotswap --watch",
+    "format": "skuba format",
+    "lint": "skuba lint",
+    "test": "skuba test",
+    "test:ci": "skuba test --coverage",
+    "test:watch": "skuba test --watch"
+  },
+  "dependencies": {
+    "@aws-sdk/client-codedeploy": "^3.363.0",
+    "@aws-sdk/client-lambda": "^3.363.0",
+    "@aws-sdk/client-sns": "^3.363.0",
+    "@seek/logger": "^6.0.0",
+    "zod": "^3.19.1"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.82",
+    "@types/node": "^20.9.0",
+    "aws-cdk": "^2.109.0",
+    "aws-cdk-lib": "^2.109.0",
+    "constructs": "^10.0.17",
+    "skuba": "^8.0.0"
+  },
+  "packageManager": "pnpm@8.15.5",
+  "engines": {
+    "node": ">=20"
+  },
+  "skuba": {
+    "entryPoint": "src/app.ts#handler",
+    "template": "lambda-sqs-worker-cdk",
+    "type": "application",
+    "version": "8.0.0"
+  }
+}
